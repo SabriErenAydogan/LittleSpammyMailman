@@ -50,6 +50,17 @@ Memory access there needs LPAE long-descriptor page table entries — this SoC
 boots with `TTBCR.EAE` set (`TTBCR = 0xb0003000`). Short-descriptor writes
 fault. Measure first with `oem cpuinfo` rather than assuming a format.
 
+**Trap:** the fastboot INFO channel dies after roughly 76 messages per
+command. A dumper that emits a whole region in one command prints its header
+and then loses the connection — which reads as flaky USB, or a bad cable, or
+"sometimes it works". It is none of those; it is deterministic. Chunk the
+output and let the host loop.
+
+A byte cap alone does not fix it either: the emitter also ends a line on
+every `\n` in the data, so line count is not proportional to byte count and
+a log-dense 4 KB can still overflow. Budget in **lines**, and report back how
+many **bytes** were consumed so the host can advance correctly.
+
 **Trap:** `expdb` is a ring. Session counts and "number of boots recorded"
 are not reliable evidence for anything.
 

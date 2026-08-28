@@ -238,7 +238,9 @@ static void cmd_cpuinfo(const char *arg, void *data, unsigned sz) {
 
 #define DUMP_LINE   56
 #define DUMP_CHUNK  2048              // esleme yalnizca bu kopya suresince acik
-#define DUMP_MAXLEN 0x00010000u
+#define DUMP_MAXLEN  0x00010000u
+// Tek komutta istenebilecek en buyuk parca (satir butcesi ayrica sinirlar).
+#define DUMP_ONESHOT 0x00001000u
 
 static uint8_t dump_buf[DUMP_CHUNK];
 
@@ -259,35 +261,56 @@ static int mem_allowed(uint32_t addr, uint32_t len) {
     return 0;
 }
 
-static void emit_lines(const uint8_t *p, uint32_t n) {
-    static char line[DUMP_LINE + 1];
-    static int col;
-    uint32_t i;
+// Komut basina guvenli INFO satiri sayisi. LK'nin fastboot INFO kanali
+// ~76 mesajda kopuyor; basliga ve "used" satirina yer birakip 64'te
+// kaliyoruz. Bayt siniri tek basina YETMEZ: emit her '\n' gorusunde de
+// satir basiyor, yani yogun log'da 4 KB bile yuzlerce satir uretebilir.
+// Bu yuzden butce SATIR cinsinden.
+#define DUMP_LINES_MAX 64
 
-    for (i = 0; i < n; i++) {
-        unsigned char c = p[i];
+static char emit_line[DUMP_LINE + 1];
+static int  emit_col;
+static int  emit_left;          // kalan satir hakki
 
-        if (c == '\n' || col == DUMP_LINE) {
-            line[col] = '\0';
-            if (col)
-                fastboot_info(line);
-            col = 0;
-            if (c == '\n')
-                continue;
+static void emit_reset(int budget) {
+    emit_col  = 0;
+    emit_left = budget;
+}
+
+// 1 = devam edilebilir, 0 = satir butcesi bitti (cagiran durmali)
+static int emit_push(unsigned char c) {
+    if (c == '\n' || emit_col == DUMP_LINE) {
+        if (emit_col) {
+            if (emit_left <= 0)
+                return 0;
+            emit_line[emit_col] = '\0';
+            fastboot_info(emit_line);
+            emit_left--;
         }
-        line[col++] = (c >= 0x20 && c < 0x7F) ? (char)c : '.';
+        emit_col = 0;
+        if (c == '\n')
+            return 1;
     }
+    emit_line[emit_col++] = (c >= 0x20 && c < 0x7F) ? (char)c : '.';
+    return 1;
 }
 
 static void emit_flush(void) {
-    // emit_lines'in kalan yarim satirini bosalt
-    fastboot_info("");
+    if (emit_col && emit_left > 0) {
+        emit_line[emit_col] = '\0';
+        fastboot_info(emit_line);
+        emit_left--;
+    }
+    emit_col = 0;
 }
 
-static void dump_region(uint32_t addr, uint32_t len) {
+// Kac BAYT basariyla gonderildigini dondurur. Butce biterse istenenden az
+// olabilir; host farki gorup ofseti ona gore ilerletir.
+static uint32_t dump_region(uint32_t addr, uint32_t len) {
     uint32_t done = 0;
+    int stop = 0;
 
-    while (done < len) {
+    while (done < len && !stop) {
         uint32_t a    = addr + done;
         uint32_t page = a & 0xFFFFF000u;
         uint32_t n    = len - done;
@@ -307,10 +330,16 @@ static void dump_region(uint32_t addr, uint32_t len) {
         if (mapped)
             mmu_restore_page(page, old);
 
-        emit_lines(dump_buf, n);
-        done += n;
+        for (i = 0; i < n; i++) {
+            if (!emit_push(dump_buf[i])) {
+                stop = 1;
+                break;
+            }
+        }
+        done += i;
     }
     emit_flush();
+    return done;
 }
 
 static uint32_t parse_hex(const char **s) {
@@ -334,30 +363,54 @@ static uint32_t parse_hex(const char **s) {
     return v;
 }
 
-// fastboot oem ramoops [uzunluk_hex]
-static void cmd_dump_ramoops(const char *arg, void *data, unsigned sz) {
+// Bir bolgenin TEK penceresini doker.
+//   fastboot oem <komut> [ofset_hex] [uzunluk_hex]
+// Ciktinin basinda size/off, sonunda used bulunur; host "used" kadar
+// ilerleyip komutu tekrarlayarak bolgenin tamamini toplar.
+static void dump_window(const char *tag, uint32_t base, uint32_t total,
+                        const char *arg) {
     const char *p = arg ? arg : "";
+    uint32_t off = parse_hex(&p);
     uint32_t len = parse_hex(&p);
+    uint32_t used;
 
-    if (len == 0 || len > DUMP_MAXLEN)
-        len = RAMOOPS_DEFLEN > DUMP_MAXLEN ? DUMP_MAXLEN : RAMOOPS_DEFLEN;
-    fastboot_info("[selene] ramoops @0x4D010000");
-    dump_region(RAMOOPS_BASE, len);
+    if (off >= total) {
+        fastboot_fail("ofset bolge disinda");
+        return;
+    }
+    if (len == 0 || len > DUMP_ONESHOT)
+        len = DUMP_ONESHOT;
+    if (off + len > total)
+        len = total - off;
+    if (!mem_allowed(base + off, len)) {
+        fastboot_fail("adres/uzunluk izinli bolgede degil");
+        return;
+    }
+
+    fastboot_info(tag);
+    hexline("size", total);
+    hexline("off", off);
+
+    emit_reset(DUMP_LINES_MAX);
+    used = dump_region(base + off, len);
+
+    hexline("used", used);
     fastboot_okay("");
 }
 
-// fastboot oem rrlog  -- mboot_params (AEE RAM console)
+// fastboot oem ramoops [ofset_hex] [uzunluk_hex]
+static void cmd_dump_ramoops(const char *arg, void *data, unsigned sz) {
+    dump_window("[selene] ramoops", RAMOOPS_BASE, RAMOOPS_DEFLEN, arg);
+}
+
+// fastboot oem rrlog [ofset_hex] [uzunluk_hex]  -- mboot_params (AEE RAM console)
 static void cmd_dump_rrlog(const char *arg, void *data, unsigned sz) {
-    fastboot_info("[selene] mboot_params @0x4D0F0000");
-    dump_region(MBOOT_DRAM, MBOOT_DRAM_SZ);
-    fastboot_okay("");
+    dump_window("[selene] mboot_params", MBOOT_DRAM, MBOOT_DRAM_SZ, arg);
 }
 
-// fastboot oem sram   -- log_store + RR basligi (DBGC)
+// fastboot oem sram [ofset_hex] [uzunluk_hex]  -- log_store + RR basligi (DBGC)
 static void cmd_dump_sram(const char *arg, void *data, unsigned sz) {
-    fastboot_info("[selene] sram @0x0010E000");
-    dump_region(SRAM_LOG_BASE, SRAM_LOG_SIZE);
-    fastboot_okay("");
+    dump_window("[selene] sram", SRAM_LOG_BASE, SRAM_LOG_SIZE, arg);
 }
 
 
@@ -365,7 +418,9 @@ static void cmd_dump_sram(const char *arg, void *data, unsigned sz) {
 static void cmd_lsm_version(const char *arg, void *data, unsigned sz) {
     fastboot_info(LSM_NAME " v" LSM_VERSION " (selene LK eklentisi)");
     fastboot_info("  auto-fastboot: 5 basarisiz boot -> fastboot");
-    fastboot_info("  log: oem ramoops / rrlog / sram / rdmem / cpuinfo");
+    fastboot_info("  log: oem ramoops/rrlog/sram [ofset] [uzunluk]");
+    fastboot_info("        oem rdmem <adres> <uzunluk> / oem cpuinfo");
+    fastboot_info("  her komut <=64 satir basar, sonunda used=0x.. verir");
     fastboot_info("  taban: kaeru AGPL-3.0 (KAERU Labs, vrdons fork)");
     fastboot_okay("");
 }
@@ -376,11 +431,14 @@ static void cmd_rdmem(const char *arg, void *data, unsigned sz) {
     uint32_t addr = parse_hex(&p);
     uint32_t len  = parse_hex(&p);
 
+    if (len > DUMP_ONESHOT)
+        len = DUMP_ONESHOT;
     if (!mem_allowed(addr, len)) {
         fastboot_fail("adres/uzunluk izinli bolgede degil");
         return;
     }
-    dump_region(addr, len);
+    emit_reset(DUMP_LINES_MAX);
+    hexline("used", dump_region(addr, len));
     fastboot_okay("");
 }
 

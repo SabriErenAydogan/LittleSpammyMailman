@@ -3,3 +3,7 @@
 out/
 out2/
 *.log
+
+# GitHub Desktop "Create repository" ile olusan bos ic ice repo.
+# Icinde yalniz .gitattributes var; guvenle silinebilir.
+LittleSpammyMailman/

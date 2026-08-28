@@ -149,7 +149,8 @@ CONFIG_MTK_WD_KICKER is not set    # duplicate symbols with aee_hangdet
 * `lklog.py` — pulls LK and preloader sessions out of an `expdb` dump.
 * `flash-session/` — flash, recover and collect scripts. `05` produces a
   decoded LK log automatically, `07` dumps device memory over
-  `fastboot oem rdmem` in 4 KB chunks.
+  `fastboot oem rdmem` in 4 KB chunks, and `08` collects a whole ramoops /
+  mboot_params / SRAM region by looping over the offset protocol above.
 
 ### `lk/`
 
@@ -158,12 +159,35 @@ CONFIG_MTK_WD_KICKER is not set    # duplicate symbols with aee_hangdet
 * **auto-fastboot** — after five consecutive failed boots the device drops
   into fastboot by itself, so a bootlooping kernel never needs a cable and
   a BROM recovery.
-* `oem ramoops`, `oem rrlog`, `oem sram`, `oem rdmem <addr> <len>`,
-  `oem cpuinfo` — read the previous boot's logs and arbitrary DRAM from
-  the bootloader, before Android exists.
+* `oem ramoops [off] [len]`, `oem rrlog [off] [len]`, `oem sram [off] [len]`,
+  `oem rdmem <addr> <len>`, `oem cpuinfo` — read the previous boot's logs
+  and arbitrary DRAM from the bootloader, before Android exists.
 
 Memory access uses LPAE long-descriptor page tables (this SoC boots with
 `TTBCR.EAE` set); short-descriptor writes will fault.
+
+**The fastboot INFO channel breaks after roughly 76 messages per command.**
+This is the single most important constraint on any bootloader-side dumper.
+An earlier version of these commands tried to emit a whole region in one
+go — 256 KB of ramoops is about 1170 INFO lines — so it printed its header
+and then the connection died. It looked intermittent; it was not.
+
+A byte limit alone is not enough, because the emitter also breaks a line on
+every `\n` in the data, so a log-dense 4 KB can still overflow. Each command
+therefore emits at most **64 lines**, then stops and reports how many
+**bytes** it actually consumed:
+
+```
+$ fastboot oem ramoops 0
+(bootloader) [selene] ramoops
+(bootloader) size=0x00040000
+(bootloader) off=0x00000000
+(bootloader) <up to 64 lines of data>
+(bootloader) used=0x00000e00
+```
+
+The host advances the offset by `used` and repeats until `off >= size`;
+`tools/flash-session/08-lkdump.sh` does exactly that.
 
 ---
 
