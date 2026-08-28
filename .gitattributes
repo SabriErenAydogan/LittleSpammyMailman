@@ -1,2 +1,14 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Yamalar ve script'ler her zaman LF olmali; CRLF'e cevrilirse
+# git apply / patch basarisiz olur ve script'ler calismaz.
+*.patch  text eol=lf
+*.sh     text eol=lf
+*.py     text eol=lf
+*.c      text eol=lf
+*.h      text eol=lf
+Makefile text eol=lf
+Kconfig  text eol=lf
+*.md     text eol=lf
+LICENSE  text eol=lf
