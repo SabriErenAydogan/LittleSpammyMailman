@@ -1,0 +1,46 @@
+selene (Redmi 10 2022, MT6769H) - Linux 4.19.191 port
+camerahalserver ISP crash @ t=66.05s
+==========================================================
+
+Kernel: 4.19.191-LittleSpammyMailman-gea790ec56f51-dirty
+Base:   fire-t-oss (mt6768 4.19 OSS release)
+
+Context: eMMC works via the MTK vendor ComboA driver ported from the
+4.14 selene source (fire-t-oss ships ComboA without any platform dir).
+MTK vendor watchdog stack (wd_api + RGU) likewise ported - that removed
+an earlier HWT reset at ~29s. Android now reaches 2nd stage: SELinux,
+vold, apexd, hwservicemanager, mTEE, netd, dm-verity, camera HAL load.
+
+--- crash ---
+[   66.054229]  (0)[1515:camerahalserver][ISP][ISP_open] - E. UserCount: 0.
+[   66.054243]  (0)[1515:camerahalserver][ISP][ISP_open] Curr UserCount(1), (process, pid, tgid)=(camerahalserver, 1515, 1515), first user
+[   66.054604]  (0)[1515:camerahalserver][MTK_SMI]SMI smi_bus_prepare_enable: 3 is not ready.
+[   66.054615]  (0)[1515:camerahalserver][MTK_SMI]SMI smi_bus_prepare_enable: 2 is not ready.
+[   66.054626]  (0)[1515:camerahalserver]Unable to handle kernel paging request at virtual address fffffffffffffffe
+[   66.054630]  (0)[1515:camerahalserver]Mem abort info:
+[   66.054634]  (0)[1515:camerahalserver]  ESR = 0x96000005
+[   66.054639]  (0)[1515:camerahalserver]  Exception class = DABT (current EL), IL = 32 bits
+[   66.054644]  (0)[1515:camerahalserver]  SET = 0, FnV = 0
+[   66.054648]  (0)[1515:camerahalserver]  EA = 0, S1PTW = 0
+[   66.054652]  (0)[1515:camerahalserver]Data abort info:
+[   66.054656]  (0)[1515:camerahalserver]  ISV = 0, ISS = 0x00000005
+[   66.054660]  (0)[1515:camerahalserver]  CM = 0, WnR = 0
+[   66.054667]  (0)[1515:camerahalserver]swapper pgtable: 4k pages, 39-bit VAs, pgdp = 000000000fa82c07
+
+--- earlier, non-fatal, same boot (display path) ---
+[   64.387472]  (1)[1622:AALMain]------------[ cut here ]------------
+[   64.387519] -(1)[1622:AALMain]WARNING: CPU: 1 PID: 1622 at dpmgr_path_user_cmd+0x264/0x400
+[   64.387524] -(1)[1622:AALMain]Modules linked in:
+Call trace:
+  dpmgr_path_user_cmd+0x264/0x400
+  primary_display_user_cmd+0x4d4/0x654
+  mtk_disp_mgr_ioctl+0x618/0xa3c
+  do_vfs_ioctl / __arm64_sys_ioctl / el0_svc
+(repeats from AALMain and PQServiceHAL; also
+ '[DISP] ioctl not supported, 0x74e07840')
+
+--- notes ---
+* SMI reports larb 2 and 3 'not ready' immediately before the fault.
+* 0xfffffffffffffffe == ERR_PTR(-2): an error pointer used without IS_ERR().
+* No backtrace: initcall_debug fills the 256K ramoops console ring within
+  one boot, and the device resets right after the Oops line.

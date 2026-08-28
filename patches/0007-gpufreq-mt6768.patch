@@ -1,0 +1,46 @@
+diff --git a/drivers/gpu/mediatek/gpufreq/mt6768/mtk_gpufreq_core.c b/drivers/gpu/mediatek/gpufreq/mt6768/mtk_gpufreq_core.c
+index 540d3a03f..c81419431 100755
+--- a/drivers/gpu/mediatek/gpufreq/mt6768/mtk_gpufreq_core.c
++++ b/drivers/gpu/mediatek/gpufreq/mt6768/mtk_gpufreq_core.c
+@@ -2836,22 +2836,29 @@ static void __mt_gpufreq_init_efuse(struct platform_device *pdev)
+ #endif
+ 
+ #ifdef CONFIG_MTK_DEVINFO
++	/*
++	 * Fall back to the default segment when the efuse nvmem cell is
++	 * unavailable (e.g. a device tree without the efuse provider node).
++	 * The original code logged the error but kept going, dereferencing
++	 * the ERR_PTR and panicking.
++	 */
++	g_efuse_id = 0x0;
+ 	efuse_cell = nvmem_cell_get(&pdev->dev, "efuse_segment_cell");
+ 	if (IS_ERR(efuse_cell)) {
+-		gpufreq_pr_err("@%s: cannot get efuse_segment_cell\n", __func__);
+-		PTR_ERR(efuse_cell);
+-	}
+-
+-	efuse_buf = (unsigned int *)nvmem_cell_read(efuse_cell, &efuse_len);
+-	nvmem_cell_put(efuse_cell);
+-	if (IS_ERR(efuse_buf)) {
+-		gpufreq_pr_err("@%s: cannot get efuse_buf of efuse segment\n", __func__);
+-	    PTR_ERR(efuse_buf);
++		gpufreq_pr_err("@%s: cannot get efuse_segment_cell (%ld), using default segment\n",
++			__func__, PTR_ERR(efuse_cell));
++	} else {
++		efuse_buf = (unsigned int *)nvmem_cell_read(efuse_cell, &efuse_len);
++		nvmem_cell_put(efuse_cell);
++		if (IS_ERR(efuse_buf)) {
++			gpufreq_pr_err("@%s: cannot get efuse_buf of efuse segment (%ld), using default segment\n",
++				__func__, PTR_ERR(efuse_buf));
++		} else {
++			g_efuse_id = (*efuse_buf & 0xFF);
++			kfree(efuse_buf);
++		}
+ 	}
+ 
+-	g_efuse_id = (*efuse_buf & 0xFF);
+-	kfree(efuse_buf);
+-
+ #else
+ 	g_efuse_id = 0x0;
+ #endif /* CONFIG_MTK_DEVINFO */

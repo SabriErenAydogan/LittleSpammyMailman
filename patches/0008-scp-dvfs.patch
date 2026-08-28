@@ -1,0 +1,39 @@
+diff --git a/drivers/misc/mediatek/scp/cm4/scp_dvfs.c b/drivers/misc/mediatek/scp/cm4/scp_dvfs.c
+index e74b21d63..f112fd0d4
+--- a/drivers/misc/mediatek/scp/cm4/scp_dvfs.c
++++ b/drivers/misc/mediatek/scp/cm4/scp_dvfs.c
+@@ -589,8 +589,16 @@ void wait_scp_dvfs_init_done(void)
+ 		mdelay(1);
+ 		count++;
+ 		if (count > 3000) {
+-			pr_err("SCP dvfs driver init fail\n");
++			/*
++			 * Give up instead of spinning here forever: if the
++			 * scp_dvfs driver never probed (e.g. its node is
++			 * absent from the device tree) the flag is never
++			 * set, and the original loop wedged boot while
++			 * printing a warning every millisecond.
++			 */
++			pr_err("SCP dvfs driver init fail, giving up\n");
+ 			WARN_ON(1);
++			break;
+ 		}
+ 	}
+ }
+@@ -603,6 +611,16 @@ int scp_pll_ctrl_set(unsigned int pll_ctrl_flag, unsigned int pll_sel)
+ 
+ 	pr_debug("%s(%d, %d)\n", __func__, pll_ctrl_flag, pll_sel);
+ 
++	/*
++	 * These are only allocated by the scp_dvfs probe, which bails out on
++	 * device trees without a "dvfs-opp" property. Bail out too instead of
++	 * dereferencing NULL.
++	 */
++	if (!mt_scp_pll || !dvfs) {
++		pr_notice("%s: scp dvfs not initialized, skipping\n", __func__);
++		return -ENODEV;
++	}
++
+ 	if (pll_sel != CLK_26M) {
+ 		idx = scp_get_freq_idx(pll_sel);
+ 		if (idx < 0) {

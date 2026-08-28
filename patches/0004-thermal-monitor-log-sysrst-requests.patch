@@ -1,0 +1,37 @@
+diff --git a/drivers/misc/mediatek/thermal/mtk_thermal_monitor.c b/drivers/misc/mediatek/thermal/mtk_thermal_monitor.c
+index 70f79b9e7..718a8b2e3 100644
+--- a/drivers/misc/mediatek/thermal/mtk_thermal_monitor.c
++++ b/drivers/misc/mediatek/thermal/mtk_thermal_monitor.c
+@@ -1757,6 +1757,32 @@ static int mtk_cooling_wrapper_set_cur_state
+ 	if (ops->get_cur_state)
+ 		ret = ops->get_cur_state(cdev, &cur_state);
+ 
++	/* selene 4.19 port: name the zone and the temperature that asked for a
++	 * sysrst reset. Without this a panic only says which cooler ran, not
++	 * which sensor misread -- and the cooler bodies are identical enough
++	 * that the linker folds them together, so even that name is unreliable.
++	 */
++	if (state != 0 && strstr(cdev->type, "sysrst") != NULL) {
++		if (mcdata->tz != NULL) {
++			struct thermal_zone_device_ops *dg_ops;
++			int dg_trip_temp = -1;
++
++			dg_ops = getClientZoneOps(mcdata->tz);
++			if (dg_ops != NULL && dg_ops->get_trip_temp != NULL)
++				dg_ops->get_trip_temp(mcdata->tz, mcdata->trip,
++						      &dg_trip_temp);
++
++			pr_err("[Thermal/sysrst] REQUEST cdev=%s state=%lu zone=%s trip=%d trip_temp=%d temp=%d last_temp=%d\n",
++			       cdev->type, state, mcdata->tz->type,
++			       mcdata->trip, dg_trip_temp,
++			       mcdata->tz->temperature,
++			       mcdata->tz->last_temperature);
++		} else {
++			pr_err("[Thermal/sysrst] REQUEST cdev=%s state=%lu zone=(null)\n",
++			       cdev->type, state);
++		}
++	}
++
+ 	/* check conditions */
+ #if MTK_THERMAL_MONITOR_CONDITIONAL_COOLING
+ 	if (state != 0) {

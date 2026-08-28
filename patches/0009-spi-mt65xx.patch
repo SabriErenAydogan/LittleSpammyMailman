@@ -1,0 +1,41 @@
+diff --git a/drivers/spi/spi-mt65xx.c b/drivers/spi/spi-mt65xx.c
+index a04e1a584..bd7ec6861
+--- a/drivers/spi/spi-mt65xx.c
++++ b/drivers/spi/spi-mt65xx.c
+@@ -860,6 +860,15 @@ static int mtk_spi_probe(struct platform_device *pdev)
+ 				goto err_put_master;
+ 			}
+ 		}
++
++		/*
++		 * Chip selects are driven through the hardware pad-select mux
++		 * (pad_sel is indexed by chip_select), so the usable chip
++		 * select count is the number of pad-select entries. Without
++		 * this the SPI core keeps its default of one and every child
++		 * on CS >= 1 fails to register.
++		 */
++		master->num_chipselect = mdata->pad_num;
+ 	}
+ 
+ 	pm_qos_add_request(&mdata->spi_qos_request, PM_QOS_CPU_DMA_LATENCY,
+@@ -965,12 +974,14 @@ static int mtk_spi_probe(struct platform_device *pdev)
+ 			goto err_disable_runtime_pm;
+ 		}
+ 
+-		if (!master->cs_gpios && master->num_chipselect > 1) {
+-			dev_err(&pdev->dev,
+-				"cs_gpios not specified and num_chipselect > 1\n");
+-			ret = -EINVAL;
+-			goto err_disable_runtime_pm;
+-		}
++		/*
++		 * cs_gpios are optional here: the pad-select mux already
++		 * drives the chip selects in hardware.
++		 */
++		if (!master->cs_gpios && master->num_chipselect > 1)
++			dev_dbg(&pdev->dev,
++				"cs_gpios not specified, using pad-select for %d chip selects\n",
++				master->num_chipselect);
+ 
+ 		if (master->cs_gpios) {
+ 			for (i = 0; i < master->num_chipselect; i++) {

@@ -1,0 +1,18 @@
+diff --git a/drivers/mmc/host/mediatek/Makefile b/drivers/mmc/host/mediatek/Makefile
+index 9413d3b7b..8da5085e1
+--- a/drivers/mmc/host/mediatek/Makefile
++++ b/drivers/mmc/host/mediatek/Makefile
+@@ -59,3 +59,13 @@ ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/ComboA/mt6739
+ obj-$(CONFIG_MMC_MTK_PRO) += ComboA/
+ endif
+ 
++# selene (mt6768): fire-t-oss bu platform blogunu icermiyordu, o yuzden
++# ComboA vendor surucusu hic derlemeye girmiyordu -> msdc probe olmuyor,
++# partition gorunmuyor, init "Failed to mount required partitions" ile
++# olumcul reboot atiyordu.
++ifeq ($(CONFIG_MTK_PLATFORM), "mt6768")
++ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/ComboA
++ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/ComboA/mt6768
++obj-$(CONFIG_MMC_MTK_PRO) += ComboA/
++endif
++

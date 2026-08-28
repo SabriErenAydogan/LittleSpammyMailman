@@ -1,0 +1,25 @@
+diff --git a/drivers/watchdog/Kconfig b/drivers/watchdog/Kconfig
+index 193d6a7cc..ff129d000
+--- a/drivers/watchdog/Kconfig
++++ b/drivers/watchdog/Kconfig
+@@ -2020,4 +2020,9 @@ config WATCHDOG_PRETIMEOUT_GOV_PANIC
+ 
+ endif # WATCHDOG_PRETIMEOUT_GOV
+ 
++
++# selene: MTK vendor watchdog yigini (wd_api + kicker).
++# fire-t-oss bunu icermiyordu; 4.14 selene kaynagindan port edildi.
++source "drivers/watchdog/mediatek/Kconfig"
++
+ endif # WATCHDOG
+diff --git a/drivers/watchdog/Makefile b/drivers/watchdog/Makefile
+index bf92e7bf9..6671a96e0
+--- a/drivers/watchdog/Makefile
++++ b/drivers/watchdog/Makefile
+@@ -217,3 +217,6 @@ obj-$(CONFIG_SOFT_WATCHDOG) += softdog.o
+ obj-$(CONFIG_MENF21BMC_WATCHDOG) += menf21bmc_wdt.o
+ obj-$(CONFIG_MENZ069_WATCHDOG) += menz69_wdt.o
+ obj-$(CONFIG_RAVE_SP_WATCHDOG) += rave-sp-wdt.o
++
++# selene: MTK vendor watchdog (wdk/ = wd_api + kicker, wdt/ = RGU surucusu)
++obj-$(CONFIG_MTK_WATCHDOG) += mediatek/

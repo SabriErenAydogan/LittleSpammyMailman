@@ -1,0 +1,100 @@
+diff --git a/drivers/misc/mediatek/thermal/common/coolers/mtk_cooler_sysrst.c b/drivers/misc/mediatek/thermal/common/coolers/mtk_cooler_sysrst.c
+index ed9755e78..9eecad022 100644
+--- a/drivers/misc/mediatek/thermal/common/coolers/mtk_cooler_sysrst.c
++++ b/drivers/misc/mediatek/thermal/common/coolers/mtk_cooler_sysrst.c
+@@ -22,6 +22,50 @@
+ #include <linux/seq_file.h>
+ #include <tscpu_settings.h>
+ 
++/*
++ * selene 4.19 port -- boot-time thermal false-trip guard.
++ *
++ * The sysrst coolers call BUG() on purpose: it is MediaTek's way of resetting
++ * the SoC when a thermal zone crosses its hardware-protection trip. On this
++ * port the trip fires at ~1.27 s of uptime, while the cooling device is still
++ * being registered -- long before any real thermal load can exist. Resetting
++ * there means we never get to see the rest of boot.
++ *
++ * Inside an early-boot window we log the full context and refuse to reset. A
++ * trip that fires that early proves the sensor reading is not trustworthy, so
++ * the reset path stays disabled for the remainder of this boot. After the
++ * window, and if no early trip was seen, the original behaviour is kept.
++ */
++#define SYSRST_BOOT_GRACE_MS 120000
++
++static bool sysrst_reset_disabled;
++
++static void sysrst_thermal_reset(const char *who)
++{
++	unsigned int up_ms = jiffies_to_msecs(jiffies - INITIAL_JIFFIES);
++
++	pr_err("[Thermal/sysrst] %s fired at %u ms uptime\n", who, up_ms);
++
++	if (up_ms < SYSRST_BOOT_GRACE_MS) {
++		if (!sysrst_reset_disabled) {
++			sysrst_reset_disabled = true;
++			pr_err("[Thermal/sysrst] trip inside %d ms boot grace -- sensor not trustworthy, thermal reset DISABLED for this boot\n",
++			       SYSRST_BOOT_GRACE_MS);
++			dump_stack();
++		}
++		return;
++	}
++
++	if (sysrst_reset_disabled) {
++		pr_err_ratelimited("[Thermal/sysrst] %s: reset disabled by early false trip, ignoring\n",
++				   who);
++		return;
++	}
++
++	/* To trigger data abort to reset the system for thermal protection. */
++	BUG();
++}
++
+ /*=============================================================
+  *Local variable definition
+  *=============================================================
+@@ -81,7 +125,7 @@ struct thermal_cooling_device *cdev, unsigned long state)
+ #ifdef CONFIG_LVTS_DYNAMIC_ENABLE_REBOOT
+ 		if (tpcb > DYNAMIC_REBOOT_TRIP_TEMP) {
+ 			tscpu_printk("SW reset! tpcb = %d\n", tpcb);
+-			BUG();
++			sysrst_thermal_reset("mtktscpu-sysrst");
+ 		} else {
+ 			tscpu_printk("Skip SW reset! tpcb = %d\n", tpcb);
+ 		}
+@@ -89,7 +133,7 @@ struct thermal_cooling_device *cdev, unsigned long state)
+ 		/* To trigger data abort to reset the system
+ 		 * for thermal protection.
+ 		 */
+-		BUG();
++		sysrst_thermal_reset("mtktscpu-sysrst");
+ #endif
+ 
+ 	}
+@@ -127,7 +171,7 @@ struct thermal_cooling_device *cdev, unsigned long state)
+ 		/* To trigger data abort to reset the system
+ 		 * for thermal protection.
+ 		 */
+-		BUG();
++		sysrst_thermal_reset("mtktsbuck-sysrst");
+ 
+ 	}
+ 	return 0;
+@@ -164,7 +208,7 @@ struct thermal_cooling_device *cdev, unsigned long state)
+ 		/* To trigger data abort to reset the system
+ 		 * for thermal protection.
+ 		 */
+-		BUG();
++		sysrst_thermal_reset("mtktsAP-sysrst");
+ 
+ 	}
+ 	return 0;
+@@ -201,7 +245,7 @@ struct thermal_cooling_device *cdev, unsigned long state)
+ 		/* To trigger data abort to reset the system
+ 		 * for thermal protection.
+ 		 */
+-		BUG();
++		sysrst_thermal_reset("mtktsbif-sysrst");
+ 
+ 	}
+ 	return 0;
