@@ -271,36 +271,57 @@ static int mem_allowed(uint32_t addr, uint32_t len) {
 static char emit_line[DUMP_LINE + 1];
 static int  emit_col;
 static int  emit_left;          // kalan satir hakki
+static int  emit_mode;          // 0 = metin, 1 = hex
 
-static void emit_reset(int budget) {
+// Hex modda satir basina tam bu kadar bayt (2 karakter/bayt).
+#define DUMP_HEXB (DUMP_LINE / 2)
+
+static void emit_reset(int budget, int mode) {
     emit_col  = 0;
     emit_left = budget;
+    emit_mode = mode;
+}
+
+static int emit_line_out(void) {
+    if (emit_left <= 0)
+        return 0;
+    emit_line[emit_col] = '\0';
+    fastboot_info(emit_line);
+    emit_left--;
+    emit_col = 0;
+    return 1;
 }
 
 // 1 = devam edilebilir, 0 = satir butcesi bitti (cagiran durmali)
 static int emit_push(unsigned char c) {
+    static const char hx[] = "0123456789abcdef";
+
+    if (emit_mode) {
+        // Hex: veriyi hic yorumlamaz, newline'a bakmaz. Satir uzunlugu sabit,
+        // yani bayt sayisi ile satir sayisi birebir orantili.
+        if (emit_col >= DUMP_HEXB * 2 && !emit_line_out())
+            return 0;
+        emit_line[emit_col++] = hx[(c >> 4) & 0xF];
+        emit_line[emit_col++] = hx[c & 0xF];
+        return 1;
+    }
+
     if (c == '\n' || emit_col == DUMP_LINE) {
-        if (emit_col) {
-            if (emit_left <= 0)
-                return 0;
-            emit_line[emit_col] = '\0';
-            fastboot_info(emit_line);
-            emit_left--;
-        }
+        if (emit_col && !emit_line_out())
+            return 0;
         emit_col = 0;
         if (c == '\n')
             return 1;
     }
-    emit_line[emit_col++] = (c >= 0x20 && c < 0x7F) ? (char)c : '.';
+    // vrdons: 0x80-0xFF gecsin ki UTF-8 log satirlari okunabilir kalsin.
+    // Yalnizca kontrol karakterleri ve DEL nokta olur.
+    emit_line[emit_col++] = (c >= 0x20 && c != 0x7F) ? (char)c : '.';
     return 1;
 }
 
 static void emit_flush(void) {
-    if (emit_col && emit_left > 0) {
-        emit_line[emit_col] = '\0';
-        fastboot_info(emit_line);
-        emit_left--;
-    }
+    if (emit_col && emit_left > 0)
+        emit_line_out();
     emit_col = 0;
 }
 
@@ -363,6 +384,13 @@ static uint32_t parse_hex(const char **s) {
     return v;
 }
 
+// "hex" kelimesi verilmisse hex modu. Baska her sey metin.
+static int parse_mode(const char *p) {
+    while (*p == ' ')
+        p++;
+    return (p[0] == 'h' && p[1] == 'e' && p[2] == 'x') ? 1 : 0;
+}
+
 // Bir bolgenin TEK penceresini doker.
 //   fastboot oem <komut> [ofset_hex] [uzunluk_hex]
 // Ciktinin basinda size/off, sonunda used bulunur; host "used" kadar
@@ -372,6 +400,7 @@ static void dump_window(const char *tag, uint32_t base, uint32_t total,
     const char *p = arg ? arg : "";
     uint32_t off = parse_hex(&p);
     uint32_t len = parse_hex(&p);
+    int mode = parse_mode(p);
     uint32_t used;
 
     if (off >= total) {
@@ -388,10 +417,11 @@ static void dump_window(const char *tag, uint32_t base, uint32_t total,
     }
 
     fastboot_info(tag);
+    fastboot_info(mode ? "mode=hex" : "mode=text");
     hexline("size", total);
     hexline("off", off);
 
-    emit_reset(DUMP_LINES_MAX);
+    emit_reset(DUMP_LINES_MAX, mode);
     used = dump_region(base + off, len);
 
     hexline("used", used);
@@ -418,8 +448,8 @@ static void cmd_dump_sram(const char *arg, void *data, unsigned sz) {
 static void cmd_lsm_version(const char *arg, void *data, unsigned sz) {
     fastboot_info(LSM_NAME " v" LSM_VERSION " (selene LK eklentisi)");
     fastboot_info("  auto-fastboot: 5 basarisiz boot -> fastboot");
-    fastboot_info("  log: oem ramoops/rrlog/sram [ofset] [uzunluk]");
-    fastboot_info("        oem rdmem <adres> <uzunluk> / oem cpuinfo");
+    fastboot_info("  log: oem ramoops/rrlog/sram [ofset] [uzunluk] [hex]");
+    fastboot_info("        oem rdmem <adres> <uzunluk> [hex] / oem cpuinfo");
     fastboot_info("  her komut <=64 satir basar, sonunda used=0x.. verir");
     fastboot_info("  taban: kaeru AGPL-3.0 (KAERU Labs, vrdons fork)");
     fastboot_okay("");
@@ -437,7 +467,7 @@ static void cmd_rdmem(const char *arg, void *data, unsigned sz) {
         fastboot_fail("adres/uzunluk izinli bolgede degil");
         return;
     }
-    emit_reset(DUMP_LINES_MAX);
+    emit_reset(DUMP_LINES_MAX, parse_mode(p));
     hexline("used", dump_region(addr, len));
     fastboot_okay("");
 }

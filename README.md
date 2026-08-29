@@ -189,6 +189,26 @@ $ fastboot oem ramoops 0
 The host advances the offset by `used` and repeats until `off >= size`;
 `tools/flash-session/08-lkdump.sh` does exactly that.
 
+**Text mode is lossy — use `hex` for anything that is not console text.**
+Every command takes an optional trailing `hex`:
+
+```
+fastboot oem rrlog 0 0 hex
+fastboot oem rdmem 4d0f0000 800 hex
+```
+
+In text mode each unprintable byte becomes `.`, which silently destroys
+binary content — and ramoops is not only console text: the mboot_params /
+AEE region and anything read through `rdmem` are binary. Hex mode emits two
+characters per byte and does not interpret newlines, so line count is exactly
+proportional to byte count and the data round-trips intact.
+`08-lkdump.sh <region> hex` reassembles it with `xxd -r -p` and checks the
+decoded size against the `used` total. Text mode also now passes `0x80`–`0xFF`
+through unchanged, so UTF-8 log lines stay readable.
+
+Both of these came from a suggestion by [vrdons](https://github.com/vrdons)
+after testing the payload.
+
 ---
 
 ## Credits
